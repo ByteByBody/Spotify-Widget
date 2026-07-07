@@ -239,7 +239,7 @@ music-mode/
 │
 ├── screenshots/                # Screenshots (add your own)
 │
-├── widget.py                   # Main widget (1885 lines)
+├── widget.py                   # Main GTK widget implementation
 ├── widget.log                  # Widget stdout/stderr
 ├── art.log                     # Art fetcher stdout/stderr
 └── README.md                   # This file
