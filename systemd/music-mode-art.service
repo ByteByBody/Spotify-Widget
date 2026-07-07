@@ -1,0 +1,16 @@
+[Unit]
+Description=Music Mode Art Fetcher
+After=graphical-session.target
+Wants=graphical-session.target
+
+[Service]
+Type=simple
+ExecStartPre=/bin/bash -c 'until pgrep -x Hyprland > /dev/null; do sleep 1; done; sleep 2'
+ExecStart=/bin/bash /home/serotonin/music-mode/scripts/art.sh
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/home/serotonin/music-mode/art.log
+StandardError=append:/home/serotonin/music-mode/art.log
+
+[Install]
+WantedBy=graphical-session.target

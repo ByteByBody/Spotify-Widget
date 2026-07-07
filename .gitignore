@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.log
+cache/cover_*.jpg
+cache/cover_raw.jpg
+cache/wallpaper_blur.jpg
+cache/cover_raw.jpg.wp.jpg
+cache/current_cover.txt
