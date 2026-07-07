@@ -39,6 +39,7 @@ os.makedirs(CACHE, exist_ok=True)
 
 COVER_FILE   = os.path.join(CACHE, "current_cover.txt")
 ACCENT_FILE    = os.path.join(CACHE, "color_accent.txt")
+VIBRANT_FILE   = os.path.join(CACHE, "color_vibrant.txt")
 OUTLINE_FILE   = os.path.join(CACHE, "color_outline.txt")
 BRIGHT_FILE    = os.path.join(CACHE, "color_brightness.txt")
 BG_CSS_FILE    = os.path.join(HOME, ".config", "waybar", "wallust", "colors-bg.css")
@@ -166,6 +167,48 @@ def fmt_time(s):
     except: return "00:00"
 
 
+def extract_accent_from_cover(src):
+    """Find the dominant hue in the cover via histogram,
+    then use the most saturated pixel in that hue range.
+    Returns clean accent + vibrant colors that always look good.
+    """
+    try:
+        from PIL import Image
+        import colorsys
+        img = Image.open(src).convert("RGB").resize((100, 100))
+        pixels = list(img.getdata())
+
+        hue_pixels = [[] for _ in range(36)]
+        for pr, pg, pb in pixels:
+            br = pr * 0.299 + pg * 0.587 + pb * 0.114
+            if br < 20 or br > 235:
+                continue
+            rn = pr / 255.0; gn = pg / 255.0; bn = pb / 255.0
+            h, l, s = colorsys.rgb_to_hls(rn, gn, bn)
+            if s < 0.10:
+                continue
+            bucket = int(h * 36) % 36
+            hue_pixels[bucket].append((pr, pg, pb, s, l))
+
+        if not any(p for p in hue_pixels if p):
+            return "#5588cc", "#77aaff"
+
+        best_bucket = max(range(36), key=lambda i: len(hue_pixels[i]))
+        best = max(hue_pixels[best_bucket], key=lambda x: x[3])
+        rn = best[0] / 255.0; gn = best[1] / 255.0; bn = best[2] / 255.0
+        h, l, s = colorsys.rgb_to_hls(rn, gn, bn)
+
+        r1, g1, b1 = colorsys.hls_to_rgb(h, 0.60, 0.65)
+        accent = f"#{int(r1*255+0.5):02x}{int(g1*255+0.5):02x}{int(b1*255+0.5):02x}"
+
+        r2, g2, b2 = colorsys.hls_to_rgb(h, 0.70, 0.85)
+        vibrant = f"#{int(r2*255+0.5):02x}{int(g2*255+0.5):02x}{int(b2*255+0.5):02x}"
+
+        return accent, vibrant
+    except Exception:
+        return "#5588cc", "#77aaff"
+
+
 # ── Screen resolution ─────────────────────────────────────────────────────────
 
 def get_screen_resolution():
@@ -286,49 +329,16 @@ def make_and_set_wallpaper(src):
                         # Pass COVER_RAW instead of WALLPAPER because heavily blurred
                         # images cause wallust to fail with "Not enough colors!"
                         subprocess.run([sync_script, COVER_RAW], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        # Override temporary accent with wallust's @color2, desaturated+darkened
-                        try:
-                            css = os.path.join(HOME, ".config", "waybar", "wallust", "colors-waybar.css")
-                            with open(css) as f:
-                                for line in f:
-                                    m = re.search(r'@define-color\s+color2\s+#([0-9a-fA-F]{6})', line)
-                                    if m:
-                                        h = m.group(1)
-                                        r3 = int(h[0:2], 16); g3 = int(h[2:4], 16); b3 = int(h[4:6], 16)
-                                        avg = (r3 + g3 + b3) / 3.0
-                                        # 50% desaturate toward gray, then darken to 55%
-                                        r3 = int((r3 * 0.5 + avg * 0.5) * 0.55)
-                                        g3 = int((g3 * 0.5 + avg * 0.5) * 0.55)
-                                        b3 = int((b3 * 0.5 + avg * 0.5) * 0.55)
-                                        # Ensure accent differs from cover-bg by at least distance 60
-                                        try:
-                                            bg_css = read_file(BG_CSS_FILE, "")
-                                            bgm = re.search(r'#([0-9a-fA-F]{6})', bg_css)
-                                            if bgm:
-                                                bh = bgm.group(1)
-                                                br = int(bh[0:2], 16); bg = int(bh[2:4], 16); bb = int(bh[4:6], 16)
-                                                dr = r3 - br; dg = g3 - bg; db = b3 - bb
-                                                dist = (dr*dr + dg*dg + db*db) ** 0.5
-                                                if dist < 60:
-                                                    scale = 60.0 / max(dist, 1)
-                                                    r3 = int(br + dr * scale)
-                                                    g3 = int(bg + dg * scale)
-                                                    b3 = int(bb + db * scale)
-                                                    r3 = max(0, min(255, r3))
-                                                    g3 = max(0, min(255, g3))
-                                                    b3 = max(0, min(255, b3))
-                                                    log(f"accent dist {dist:.0f} → {60} (pushed)")
-                                        except Exception:
-                                            pass
-                                        a = f"#{r3:02x}{g3:02x}{b3:02x}"
-                                        write_file(ACCENT_FILE, a)
-                                        bri = (r3*299+g3*587+b3*114)//1000
-                                        write_file(OUTLINE_FILE, "#000000" if bri>145 else "#ffffff")
-                                        write_file(BRIGHT_FILE, str(bri))
-                                        log(f"wallust accent: {a} bri={bri} (muted from #{h})")
-                                        break
-                        except Exception as e:
-                            log(f"wallust accent read error: {e}")
+                        # Extract clean accent from cover via HSL (hue from image,
+                        # fixed saturation/lightness for consistent quality)
+                        accent_hex, vibrant_hex = extract_accent_from_cover(COVER_RAW)
+                        write_file(ACCENT_FILE, accent_hex)
+                        write_file(VIBRANT_FILE, vibrant_hex)
+                        ri = int(accent_hex[1:3], 16); gi = int(accent_hex[3:5], 16); bi = int(accent_hex[5:7], 16)
+                        bri = (ri*299+gi*587+bi*114)//1000
+                        write_file(OUTLINE_FILE, "#000000" if bri>145 else "#ffffff")
+                        write_file(BRIGHT_FILE, str(bri))
+                        log(f"accent: {accent_hex} bri={bri} (vibrant: {vibrant_hex})")
                     # Full waybar restart to refresh window/workspace tracking.
                     # SIGUSR2 (used by WallustSwww.sh) doesn't always reload
                     # the hyprland/window and hyprland/workspaces modules.
@@ -382,7 +392,7 @@ class ArtProcessor(threading.Thread):
 
         # Poll for wallust accent updates even when cover hasn't changed
         try:
-            mt = os.path.getmtime(ACCENT_FILE)
+            mt = max(os.path.getmtime(ACCENT_FILE), os.path.getmtime(VIBRANT_FILE))
             if mt > self._last_accent_mtime:
                 self._last_accent_mtime = mt
                 self._reload_accent()
@@ -1022,6 +1032,7 @@ class MusicWidget(Gtk.Window):
         self.cover_path       = ""
         self._cover_fade      = 1.0    # 0=old, 1=new
         self.accent           = (0.2, 0.7, 1.0)
+        self.vibrant          = (0.2, 0.7, 1.0)
         self.secondary        = (0.6, 0.4, 1.0)
         self.outline          = (0.0, 0.0, 0.0)
         self._static_surface  = None
@@ -1128,6 +1139,7 @@ class MusicWidget(Gtk.Window):
             except Exception as e:
                 log(f"cover load error: {e}")
         self.accent  = hex_to_rgb(read_file(ACCENT_FILE,  "#33aaff"))
+        self.vibrant = hex_to_rgb(read_file(VIBRANT_FILE, "#33aaff"))
         self.outline = hex_to_rgb(read_file(OUTLINE_FILE, "#000000"))
         try:    bri = int(read_file(BRIGHT_FILE,"40"))
         except: bri = 40
