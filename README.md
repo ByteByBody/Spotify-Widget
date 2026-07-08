@@ -2,7 +2,7 @@
 
 An album-art-driven desktop customization system that transforms your Linux desktop into a dynamic music experience. When Spotify plays, a floating GTK widget appears with cover art, controls, and a live audio visualizer — while your wallpaper, Waybar, Hyprland borders, Rofi launcher, and Kitty terminal all synchronize to the track's color palette.
 
-![Music Mode Widget](screenshots/widget-preview.png)
+![Music Mode Widget](screenshots/demo.gif)
 
 > **Note:** Add actual screenshots to the `screenshots/` directory.
 
