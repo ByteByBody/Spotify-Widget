@@ -6,11 +6,11 @@ Wants=graphical-session.target
 [Service]
 Type=simple
 ExecStartPre=/bin/bash -c 'until [ -n "$HYPRLAND_INSTANCE_SIGNATURE" ] || pgrep -x Hyprland > /dev/null; do sleep 1; done; sleep 3'
-ExecStart=/usr/bin/python3 /home/serotonin/music-mode/widget.py
+ExecStart=/usr/bin/python3 %h/music-mode/widget.py
 Restart=on-failure
 RestartSec=5
-StandardOutput=append:/home/serotonin/music-mode/widget.log
-StandardError=append:/home/serotonin/music-mode/widget.log
+StandardOutput=append:%h/music-mode/widget.log
+StandardError=append:%h/music-mode/widget.log
 Environment=PYTHONUNBUFFERED=1
 
 [Install]
