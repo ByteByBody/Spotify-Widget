@@ -4,7 +4,7 @@ An album-art-driven desktop customization system that transforms your Linux desk
 
 ![Music Mode Widget](screenshots/demo.gif)
 
-> **Note:** Add actual screenshots to the `screenshots/` directory.
+
 
 ## Why This Exists
 
