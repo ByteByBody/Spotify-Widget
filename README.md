@@ -70,16 +70,15 @@ pip install pygobject Pillow
 ### Clone and Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/music-mode.git ~/music-mode
-cd ~/music-mode
+git clone https://github.com/ByteByBody/Spotify-Widget.git ~/Spotify-Widget
+cd ~/Spotify-Widget
 
 # Make scripts executable
 chmod +x scripts/*.sh
 
 # Install systemd user services
 mkdir -p ~/.config/systemd/user
-cp systemd/music-mode-widget.service ~/.config/systemd/user/
-cp systemd/music-mode-art.service ~/.config/systemd/user/
+cp systemd/*.service ~/.config/systemd/user/
 
 # Reload and enable
 systemctl --user daemon-reload
