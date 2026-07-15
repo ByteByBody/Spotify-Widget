@@ -283,7 +283,7 @@ Color changes propagate outward: the widget writes `colors-bg.css` (cover backgr
 - [x] **MPRIS generic player support** — Now detects Spotify *and* any active player via `playerctl --player=spotify,%any`
 - [x] **Config file** — Edit `~/.config/music-mode/config.json` to tweak behaviour without touching code
 - [x] **Smarter color extraction** — K-Means palette analysis replaces rigid hue histograms for natural, mood-aware accent colours
-- [ ] Full album art on wallpaper (remove blur, overlay track info)
+- [x] Full album art on wallpaper (crisp cover over blurred background + track info)
 - [ ] Multiple Spotify device support
 - [ ] Last.fm scrobbling integration
 - [ ] PyPI package for easier installation

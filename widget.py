@@ -323,25 +323,108 @@ def _ensure_swww_daemon():
         return False
 
 def make_and_set_wallpaper(src):
-    """Generate a blurred, darkened wallpaper from *src* and push it to the
-    compositor.  Tries swww (Hyprland/Wayland) first; falls back to gsettings
-    (Cinnamon/X11).
+    """Generate wallpaper from *src* according to CONFIG and push it to the
+    compositor.  Tries swww (Hyprland/Wayland) first; falls back to gsettings.
 
     Safe to call from a background thread.
     """
     TW, TH = get_screen_resolution()
     try:
-        from PIL import Image, ImageFilter
-        img   = Image.open(src).convert("RGB")
+        from PIL import Image, ImageFilter, ImageDraw, ImageFont
+        img = Image.open(src).convert("RGB")
         iw, ih = img.size
-        scale  = max(TW / iw, TH / ih)
-        nw, nh = int(iw * scale) + 1, int(ih * scale) + 1
-        img   = img.resize((nw, nh), Image.LANCZOS)
-        img   = img.crop(((nw - TW) // 2, (nh - TH) // 2,
-                          (nw - TW) // 2 + TW, (nh - TH) // 2 + TH))
-        img   = img.filter(ImageFilter.GaussianBlur(radius=16))
-        img   = img.point(lambda p: int(p * 0.70))
-        img.save(WALLPAPER, "JPEG", quality=88)
+        
+        # Read config values with defaults
+        blur_mode = CONFIG.get("blur_wallpaper", True)
+        overlay_info = CONFIG.get("overlay_track_info", False)
+
+        if blur_mode:
+            scale  = max(TW / iw, TH / ih)
+            nw, nh = int(iw * scale) + 1, int(ih * scale) + 1
+            bg   = img.resize((nw, nh), Image.LANCZOS)
+            bg   = bg.crop(((nw - TW) // 2, (nh - TH) // 2,
+                              (nw - TW) // 2 + TW, (nh - TH) // 2 + TH))
+            bg   = bg.filter(ImageFilter.GaussianBlur(radius=16))
+            bg   = bg.point(lambda p: int(p * 0.70))
+        else:
+            # Crisp mode: heavily blurred background + crisp cover in center
+            scale  = max(TW / iw, TH / ih)
+            nw, nh = int(iw * scale) + 1, int(ih * scale) + 1
+            bg   = img.resize((nw, nh), Image.LANCZOS)
+            bg   = bg.crop(((nw - TW) // 2, (nh - TH) // 2,
+                              (nw - TW) // 2 + TW, (nh - TH) // 2 + TH))
+            bg   = bg.filter(ImageFilter.GaussianBlur(radius=32))
+            bg   = bg.point(lambda p: int(p * 0.50)) # darker
+            
+            # Resize cover to be reasonable size (e.g. max 50% of screen height)
+            cover_size = int(TH * 0.5)
+            # Ensure it fits width-wise too (unlikely to be an issue, but safe)
+            cover_size = min(cover_size, int(TW * 0.5))
+            cover = img.resize((cover_size, cover_size), Image.LANCZOS)
+            
+            y_offset = (TH - cover_size) // 2
+            if overlay_info:
+                y_offset -= 80 # shift up to make room for text
+            
+            # Draw subtle drop shadow
+            shadow = Image.new("RGBA", (cover_size, cover_size), (0,0,0, 100))
+            bg.paste(shadow, ((TW - cover_size) // 2 + 10, y_offset + 10), shadow)
+            # Paste cover
+            bg.paste(cover, ((TW - cover_size) // 2, y_offset))
+
+        if overlay_info:
+            title = (run(f"playerctl {PLAYER_ARG} metadata xesam:title") or "Unknown Title").strip()
+            artist = (run(f"playerctl {PLAYER_ARG} metadata xesam:artist") or "Unknown Artist").strip()
+            
+            draw = ImageDraw.Draw(bg)
+            
+            # Attempt to load fonts
+            font_title, font_artist = None, None
+            font_paths = [
+                "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf"
+            ]
+            for path in font_paths:
+                try:
+                    font_title = ImageFont.truetype(path, 64)
+                    break
+                except: pass
+                
+            artist_paths = [
+                "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/TTF/DejaVuSans.ttf"
+            ]
+            for path in artist_paths:
+                try:
+                    font_artist = ImageFont.truetype(path, 48)
+                    break
+                except: pass
+                
+            if not font_title: font_title = ImageFont.load_default()
+            if not font_artist: font_artist = ImageFont.load_default()
+            
+            if not blur_mode:
+                text_y = y_offset + cover_size + 40
+            else:
+                text_y = TH // 2 + 100
+                
+            try:
+                tw = draw.textlength(title, font=font_title)
+                aw = draw.textlength(artist, font=font_artist)
+            except:
+                tw, aw = 400, 300 # Fallback sizes for load_default
+                
+            # Outline/shadow for text for readability
+            for ox, oy in [(-2,-2),(-2,2),(2,-2),(2,2)]:
+                draw.text(((TW - tw) // 2 + ox, text_y + oy), title, font=font_title, fill="black")
+                draw.text(((TW - aw) // 2 + ox, text_y + 80 + oy), artist, font=font_artist, fill="black")
+                
+            draw.text(((TW - tw) // 2, text_y), title, font=font_title, fill="white")
+            draw.text(((TW - aw) // 2, text_y + 80), artist, font=font_artist, fill="#dddddd")
+
+        bg.save(WALLPAPER, "JPEG", quality=88)
     except ImportError:
         subprocess.run(["convert", src,
                         "-resize", f"{TW}x{TH}^", "-gravity", "center",
@@ -445,12 +528,26 @@ class ArtProcessor(threading.Thread):
         track_id = run(f"playerctl {PLAYER_ARG} metadata mpris:trackid")
         raw_url = run(f"playerctl {PLAYER_ARG} metadata mpris:artUrl")
         
+        track_changed = False
+        if not hasattr(self, '_last_track_id'):
+            track_changed = True
+        elif self._last_track_id != track_id:
+            track_changed = True
+        self._last_track_id = track_id
+        
         # If no art URL is provided (common for local Spotify files), try to
         # extract embedded cover art from the actual music file.
         LOCAL_DIR = os.path.join(HOME, "Music", "Spotify Local")
         if not raw_url:
             clean = "fallback:" + track_id
-            if clean == self._last_url: return
+            if clean == self._last_url:
+                if track_changed and CONFIG.get("overlay_track_info", False):
+                    # Redraw wallpaper for new track info
+                    raw_copy = COVER_RAW+".wp.jpg"
+                    if os.path.exists(COVER_RAW):
+                        import shutil; shutil.copy2(COVER_RAW, raw_copy)
+                        import threading; threading.Thread(target=make_and_set_wallpaper, args=(raw_copy,), daemon=True, name="wp").start()
+                return
             self._last_url = clean
             log(f"using fallback art for: {track_id}")
 
@@ -513,7 +610,14 @@ class ArtProcessor(threading.Thread):
                     return
                     
             clean = raw_url.split("?")[0]
-            if clean == self._last_url: return
+            if clean == self._last_url:
+                if track_changed and CONFIG.get("overlay_track_info", False):
+                    # Redraw wallpaper for new track info
+                    raw_copy = COVER_RAW+".wp.jpg"
+                    if os.path.exists(COVER_RAW):
+                        import shutil; shutil.copy2(COVER_RAW, raw_copy)
+                        import threading; threading.Thread(target=make_and_set_wallpaper, args=(raw_copy,), daemon=True, name="wp").start()
+                return
             self._last_url = clean
             log(f"new art URL: {clean}")
             
