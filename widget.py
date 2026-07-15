@@ -1021,6 +1021,8 @@ class SpotifyTracker:
         self.status  = "Stopped"
         self.song    = ""
         self.artist  = ""
+        self.art_url = ""
+        self.history = []
         self.pos     = 0
         self.dur     = 1
         self.shuffle = False
@@ -1064,6 +1066,19 @@ class SpotifyTracker:
         if new_status in ("Playing","Paused"):
             self.song   = run(f"playerctl {PLAYER_ARG} metadata xesam:title")  or ""
             self.artist = run(f"playerctl {PLAYER_ARG} metadata xesam:artist") or ""
+            track_id = run(f"playerctl {PLAYER_ARG} metadata mpris:trackid") or ""
+            art_url = run(f"playerctl {PLAYER_ARG} metadata mpris:artUrl") or ""
+            
+            # Add to history if track changed
+            if track_id and (not self.history or self.history[-1]['id'] != track_id):
+                self.history.append({
+                    "id": track_id,
+                    "title": self.song,
+                    "artist": self.artist,
+                    "art_url": art_url
+                })
+                if len(self.history) > 100:
+                    self.history.pop(0)
             try:
                 us = int(run(f"playerctl {PLAYER_ARG} metadata mpris:length") or "0")
                 self.dur = max(1, us//1_000_000)
@@ -1434,8 +1449,39 @@ class MusicWidget(Gtk.Window):
                 os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")):
             Gdk.keyboard_ungrab(Gdk.CURRENT_TIME)
         return False
+    def _generate_preview(self, track):
+        try:
+            url = track.get("art_url")
+            if not url: return
+            
+            clean = url.split("?")[0]
+            if clean.startswith("spotify:image:"):
+                clean = "https://i.scdn.co/image/" + clean.split(":")[-1]
+                
+            prev_raw = os.path.join(CACHE, "preview_raw.jpg")
+            if clean.startswith("http"):
+                subprocess.run(["curl", "-sL", clean, "-o", prev_raw], stderr=subprocess.DEVNULL)
+            elif clean.startswith("file://"):
+                import urllib.parse
+                p = urllib.parse.unquote(clean[7:])
+                import shutil
+                shutil.copy2(p, prev_raw)
+                
+            if os.path.exists(prev_raw):
+                # Update wallpaper
+                make_and_set_wallpaper(prev_raw)
+                
+                # Optional: update colors
+                bg_col = extract_cover_bg(prev_raw)
+                write_file(BG_CSS_FILE, f"@define-color cover-bg {bg_col};\n")
+                
+                # We could run Wallust here, but that is heavy. 
+                # Just generating the wallpaper is enough for a smooth preview!
+        except Exception as e:
+            log(f"Preview error: {e}")
 
     def on_key(self, w, event):
+
         if self.sp.status not in ("Playing","Paused"): return False
         self._last_interaction = time.monotonic()
         key = event.keyval
@@ -1687,8 +1733,47 @@ class MusicWidget(Gtk.Window):
             self._static_dirty = True
 
         # Paint cached surface (includes cava)
-        cr.set_source_surface(self._static_surface, 0, 0)
-        cr.paint_with_alpha(effective_alpha)
+        # Draw the cached static surface with crossfade
+        cr.save()
+        if self.mode == "explorer" or self.explorer_anim > 0:
+            cr.set_source_surface(self._static_surface, 0, 0)
+            cr.paint_with_alpha(effective_alpha * (1.0 - self.explorer_anim))
+            
+            # Draw explorer
+            cr.save()
+            # Slide in from right or fade in
+            cr.translate(W * (1.0 - self.explorer_anim), 0)
+            cr.set_operator(cairo.OPERATOR_OVER)
+            
+            # Draw list
+            list_y = 100
+            clip_y = 80
+            clip_h = H - 160
+            cr.rectangle(0, clip_y, W, clip_h)
+            cr.clip()
+            
+            for i, track in enumerate(self.explorer_list):
+                item_y = list_y + i * 60 - self.explorer_scroll
+                
+                # Only draw if visible
+                if item_y < clip_y - 60 or item_y > clip_y + clip_h:
+                    continue
+                    
+                # Selection highlight
+                if i == self.explorer_sel:
+                    self._rrect(cr, 20, item_y, W - 40, 50, 8)
+                    cr.set_source_rgba(1, 1, 1, 0.1)
+                    cr.fill()
+                    
+                # Text
+                self._label(cr, track.get('title', 'Unknown'), 30, item_y + 10, 12, (1,1,1,1), align="left")
+                self._label(cr, track.get('artist', 'Unknown'), 30, item_y + 30, 10, (0.8,0.8,0.8,1), align="left")
+            cr.restore()
+        else:
+            cr.set_source_surface(self._static_surface, 0, 0)
+            cr.paint_with_alpha(effective_alpha)
+        cr.restore()
+
 
         # Draw time labels directly every frame so they always show live position
         self._draw_time_labels(cr)
