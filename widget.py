@@ -1394,6 +1394,34 @@ class MusicWidget(Gtk.Window):
         elif self._dim_alpha > dim_target:
             self._dim_alpha = max(dim_target, self._dim_alpha - 0.008)
 
+
+        # Mode animation
+        tgt = 1.0 if getattr(self, 'mode', 'player') == "explorer" else 0.0
+        if not hasattr(self, 'explorer_anim'):
+            self.explorer_anim = 0.0
+        if not hasattr(self, 'explorer_scroll'):
+            self.explorer_scroll = 0.0
+            
+        if abs(self.explorer_anim - tgt) > 0.005:
+            self.explorer_anim += (tgt - self.explorer_anim) * 0.12
+            self.da.queue_draw()
+        else:
+            self.explorer_anim = tgt
+            
+        if getattr(self, 'mode', 'player') == "explorer":
+            tgt_scroll = getattr(self, 'explorer_sel', 0) * 60
+            if abs(self.explorer_scroll - tgt_scroll) > 0.5:
+                self.explorer_scroll += (tgt_scroll - self.explorer_scroll) * 0.2
+                self.da.queue_draw()
+            
+            import time
+            if hasattr(self, 'preview_timer') and self.preview_timer > 0 and time.time() > self.preview_timer:
+                self.preview_timer = 0
+                if self.explorer_list:
+                    track = self.explorer_list[self.explorer_sel]
+                    import threading
+                    threading.Thread(target=self._generate_preview, args=(track,), daemon=True).start()
+
         # ── Idle-skip optimisation ────────────────────────────────────────────
         # Skip queue_draw() entirely when nothing is animating.
         # Drops idle CPU from ~5-8% to <0.5%.
@@ -1433,6 +1461,7 @@ class MusicWidget(Gtk.Window):
     # ── Input ─────────────────────────────────────────────────────────────────
 
     def on_enter(self, w, event):
+        log("MOUSE ENTERED WIDGET")
         self._hovered = True
         self._last_interaction = time.monotonic()
         if os.environ.get("WAYLAND_DISPLAY") or os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
@@ -1499,7 +1528,7 @@ class MusicWidget(Gtk.Window):
                 
             self.explorer_sel = 0
             self.explorer_scroll = 0.0
-            self.queue_draw()
+            self.da.queue_draw()
             return True
             
         if getattr(self, 'mode', 'player') == "explorer":
@@ -1507,26 +1536,26 @@ class MusicWidget(Gtk.Window):
                 self.mode = "player"
                 import threading
                 threading.Thread(target=make_and_set_wallpaper, args=(COVER_RAW,), daemon=True).start()
-                self.queue_draw()
+                self.da.queue_draw()
                 return True
             elif key == Gdk.KEY_Up:
                 if self.explorer_sel > 0:
                     self.explorer_sel -= 1
                     self.preview_timer = time.time() + 0.3
-                self.queue_draw()
+                self.da.queue_draw()
                 return True
             elif key == Gdk.KEY_Down:
                 if self.explorer_sel < len(self.explorer_list) - 1:
                     self.explorer_sel += 1
                     self.preview_timer = time.time() + 0.3
-                self.queue_draw()
+                self.da.queue_draw()
                 return True
             elif key in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
                 if self.explorer_list:
                     track = self.explorer_list[self.explorer_sel]
                     run(f"playerctl {PLAYER_ARG} open '{track['id']}'")
                     self.mode = "player"
-                self.queue_draw()
+                self.da.queue_draw()
                 return True
                 
         if key == Gdk.KEY_space:
