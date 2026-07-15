@@ -1493,6 +1493,68 @@ class MusicWidget(Gtk.Window):
         if self.sp.status not in ("Playing","Paused"): return False
         self._last_interaction = time.monotonic()
         key = event.keyval
+        if key in (Gdk.KEY_p, Gdk.KEY_P) and getattr(self, 'mode', 'player') == "player":
+            self.mode = "explorer"
+            self.explorer_list = list(reversed(self.sp.history)) if hasattr(self.sp, 'history') else []
+            try:
+                import spotipy
+                from spotipy.oauth2 import SpotifyOAuth
+                import json
+                cfg = json.load(open(os.path.expanduser("~/.config/music-mode/config.json")))
+                cid = cfg.get("spotify_client_id")
+                sec = cfg.get("spotify_client_secret")
+                if cid and sec:
+                    sp_auth = spotipy.Spotify(auth_manager=SpotifyOAuth(
+                        client_id=cid, client_secret=sec, 
+                        redirect_uri="http://localhost:8080/callback",
+                        cache_path=os.path.expanduser("~/.config/music-mode/.spotify_cache")
+                    ))
+                    queue = sp_auth.queue()
+                    if queue and 'queue' in queue:
+                        live = []
+                        for item in queue['queue']:
+                            live.append({
+                                "id": item['uri'],
+                                "title": item['name'],
+                                "artist": item['artists'][0]['name'] if item['artists'] else "Unknown",
+                                "art_url": item['album']['images'][0]['url'] if item['album']['images'] else ""
+                            })
+                        self.explorer_list = live + self.explorer_list
+            except Exception as e:
+                log(f"Spotipy error: {e}")
+                
+            self.explorer_sel = 0
+            self.explorer_scroll = 0.0
+            self.queue_draw()
+            return True
+            
+        if getattr(self, 'mode', 'player') == "explorer":
+            if key == Gdk.KEY_Escape:
+                self.mode = "player"
+                import threading
+                threading.Thread(target=make_and_set_wallpaper, args=(COVER_RAW,), daemon=True).start()
+                self.queue_draw()
+                return True
+            elif key == Gdk.KEY_Up:
+                if self.explorer_sel > 0:
+                    self.explorer_sel -= 1
+                    self.preview_timer = time.time() + 0.3
+                self.queue_draw()
+                return True
+            elif key == Gdk.KEY_Down:
+                if self.explorer_sel < len(self.explorer_list) - 1:
+                    self.explorer_sel += 1
+                    self.preview_timer = time.time() + 0.3
+                self.queue_draw()
+                return True
+            elif key in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+                if self.explorer_list:
+                    track = self.explorer_list[self.explorer_sel]
+                    run(f"playerctl {PLAYER_ARG} open '{track['id']}'")
+                    self.mode = "player"
+                self.queue_draw()
+                return True
+                
         if key == Gdk.KEY_space:
             run(f"playerctl {PLAYER_ARG} play-pause")
             self.sp.status = "Paused" if self.sp.status=="Playing" else "Playing"
