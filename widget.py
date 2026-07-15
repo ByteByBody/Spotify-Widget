@@ -545,8 +545,8 @@ class ArtProcessor(threading.Thread):
                     # Redraw wallpaper for new track info
                     raw_copy = COVER_RAW+".wp.jpg"
                     if os.path.exists(COVER_RAW):
-                        import shutil; shutil.copy2(COVER_RAW, raw_copy)
-                        import threading; threading.Thread(target=make_and_set_wallpaper, args=(raw_copy,), daemon=True, name="wp").start()
+                        shutil.copy2(COVER_RAW, raw_copy)
+                        threading.Thread(target=make_and_set_wallpaper, args=(raw_copy,), daemon=True, name="wp").start()
                 return
             self._last_url = clean
             log(f"using fallback art for: {track_id}")
@@ -615,8 +615,8 @@ class ArtProcessor(threading.Thread):
                     # Redraw wallpaper for new track info
                     raw_copy = COVER_RAW+".wp.jpg"
                     if os.path.exists(COVER_RAW):
-                        import shutil; shutil.copy2(COVER_RAW, raw_copy)
-                        import threading; threading.Thread(target=make_and_set_wallpaper, args=(raw_copy,), daemon=True, name="wp").start()
+                        shutil.copy2(COVER_RAW, raw_copy)
+                        threading.Thread(target=make_and_set_wallpaper, args=(raw_copy,), daemon=True, name="wp").start()
                 return
             self._last_url = clean
             log(f"new art URL: {clean}")
