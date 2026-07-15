@@ -1233,6 +1233,14 @@ class MusicWidget(Gtk.Window):
 
         # Right-click context menu
         self._menu_open   = False
+
+        self.mode = "player"
+        self.explorer_anim = 0.0
+        self.explorer_scroll = 0.0
+        self.explorer_sel = 0
+        self.explorer_list = []
+        self.preview_timer = 0
+        self.preview_thread = None
         self._menu_items  = ["Open Spotify", "Copy song info", "Hide widget"]
         self._menu_hover  = -1   # which item is highlighted
 
