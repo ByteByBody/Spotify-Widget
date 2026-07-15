@@ -347,7 +347,7 @@ def make_and_set_wallpaper(src):
             bg   = bg.filter(ImageFilter.GaussianBlur(radius=16))
             bg   = bg.point(lambda p: int(p * 0.70))
         else:
-            # Crisp mode: heavily blurred background + crisp cover in center
+            # Crisp mode: heavily blurred background + crisp cover
             scale  = max(TW / iw, TH / ih)
             nw, nh = int(iw * scale) + 1, int(ih * scale) + 1
             bg   = img.resize((nw, nh), Image.LANCZOS)
@@ -356,15 +356,19 @@ def make_and_set_wallpaper(src):
             bg   = bg.filter(ImageFilter.GaussianBlur(radius=32))
             bg   = bg.point(lambda p: int(p * 0.50)) # darker
             
-            # Resize cover to be reasonable size (e.g. max 50% of screen height)
-            cover_size = int(TH * 0.5)
-            # Ensure it fits width-wise too (unlikely to be an issue, but safe)
-            cover_size = min(cover_size, int(TW * 0.5))
+            # The GTK controls start at ~806px from the top (on a 1080p screen).
+            # We have the top 800px to play with.
+            # Center of top 800px is 400.
+            available_h = int(TH * 0.75) # Usually 810 for 1080p
+            
+            cover_size = int(TH * 0.45) # 486 for 1080p
+            cover_size = min(cover_size, int(TW * 0.45))
             cover = img.resize((cover_size, cover_size), Image.LANCZOS)
             
-            y_offset = (TH - cover_size) // 2
+            # Center cover in the top available space, slightly shifted up to make room for text
+            y_offset = (available_h - cover_size) // 2
             if overlay_info:
-                y_offset -= 80 # shift up to make room for text
+                y_offset -= 60
             
             # Draw subtle drop shadow
             shadow = Image.new("RGBA", (cover_size, cover_size), (0,0,0, 100))
@@ -1742,6 +1746,7 @@ class MusicWidget(Gtk.Window):
 
 
     def _draw_song(self, cr):
+        if not CONFIG.get('blur_wallpaper', True): return
         t = self.sp.song
         if not t: return
 
@@ -1797,6 +1802,7 @@ class MusicWidget(Gtk.Window):
         cr.restore()
 
     def _draw_cover(self, cr):
+        if not CONFIG.get('blur_wallpaper', True): return
         ax,ay,aw,r = IMG_X,IMG_Y,IMG_W,14
         # Shadow
         cr.new_path(); cr.set_source_rgba(0,0,0,0.38)
@@ -1823,12 +1829,14 @@ class MusicWidget(Gtk.Window):
         cr.set_line_width(1.0); self._rrect(cr,ax,ay,aw,aw,r); cr.stroke()
 
     def _draw_artist(self, cr):
+        if not CONFIG.get('blur_wallpaper', True): return
         t = self.sp.artist
         if not t: return
         if len(t)>30: t=t[:29]+"…"
         self._label(cr, t, W//2, ARTIST_Y, 15, (*self.accent,0.90), italic=True)
 
     def _draw_extras(self, cr):
+        if not CONFIG.get('blur_wallpaper', True): return
         cy = EXTRA_Y
 
         # Shuffle icon
