@@ -146,6 +146,26 @@ systemctl --user restart music-mode-widget.service
 
 ## Configuration
 
+### Config File
+
+Create `~/.config/music-mode/config.json` to customize behaviour:
+
+```json
+{
+  "blur_wallpaper": true,
+  "overlay_track_info": false,
+  "player": "spotify,%any",
+  "widget_scale": 1.0
+}
+```
+
+| Key | Default | Purpose |
+|-----|---------|---------|
+| `blur_wallpaper` | `true` | Blur the wallpaper background (false = crisp album art + overlay) |
+| `overlay_track_info` | `false` | Show song/artist text on the wallpaper |
+| `player` | `"spotify,%any"` | MPRIS player priority (Spotify preferred, fallback to any) |
+| `widget_scale` | `1.0` | Widget size multiplier |
+
 ### Environment Variables
 
 | Variable | Required | Default | Purpose |
@@ -159,6 +179,7 @@ systemctl --user restart music-mode-widget.service
 
 | Path | Purpose |
 |------|---------|
+| `~/.config/music-mode/config.json` | User configuration (overrides defaults) |
 | `~/music-mode/cache/` | Runtime data: covers, colors, wallpaper, cava config |
 | `~/Music/Spotify Local/` | Local MP3 files with embedded cover art |
 | `~/.config/music-mode/theme-sync.sh` | Color sync daemon for Hyprland/Waybar/Rofi/Kitty |
@@ -166,7 +187,7 @@ systemctl --user restart music-mode-widget.service
 | `~/.config/waybar/wallust/colors-bg.css` | Widget-written cover background color |
 | `~/.config/waybar/wallust/colors-waybar.css` | Wallust-generated palette (16 colors) |
 | `~/.config/waybar/colors.css` | theme-sync's accent color for Waybar |
-| `~/.config/waybar/style/[WALLUST] ML4W-modern.css` | Active Waybar CSS (imports above) |
+| `~/.config/waybar/style/music-mode.css` | Active Waybar CSS (imports above) |
 | `~/.config/hypr/UserConfigs/WindowRules.conf` | Widget window rules (nofocus, pin) |
 | `~/.config/hypr/UserConfigs/UserDecorations.conf` | Auto-generated Hyprland border colors |
 
@@ -175,13 +196,13 @@ systemctl --user restart music-mode-widget.service
 ```
 Album Art
     │
-    ├──→ Widget extracts perceptually-weighted average → colors-bg.css (cover-bg)
+    ├──→ Widget extracts cover-bg → colors-bg.css
     │
     ├──→ swww sets blurred wallpaper → wallust generates colors-waybar.css
     │                                         │
-    │                                         └──→ Widget reads color2 → desaturate 50% + darken 55%
-    │                                                → contrast-push (dist≥60 from cover-bg)
-    │                                                → color_accent.txt
+    │                                         └──→ Widget K-Means palette extraction
+    │                                                → adaptive clamping (S/L clamped)
+    │                                                → color_accent.txt + color_vibrant.txt
     │                                                       │
     │                                                       └──→ theme-sync.sh →
     │                                                             ├── Hyprland borders
@@ -259,10 +280,12 @@ Color changes propagate outward: the widget writes `colors-bg.css` (cover backgr
 
 ## Roadmap
 
+- [x] **MPRIS generic player support** — Now detects Spotify *and* any active player via `playerctl --player=spotify,%any`
+- [x] **Config file** — Edit `~/.config/music-mode/config.json` to tweak behaviour without touching code
+- [x] **Smarter color extraction** — K-Means palette analysis replaces rigid hue histograms for natural, mood-aware accent colours
 - [ ] Full album art on wallpaper (remove blur, overlay track info)
 - [ ] Multiple Spotify device support
 - [ ] Last.fm scrobbling integration
-- [ ] MPRIS generic player support (not just Spotify)
 - [ ] PyPI package for easier installation
 - [ ] GUI configuration panel
 - [ ] MPD/ncmpcpp support

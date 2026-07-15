@@ -33,6 +33,28 @@ os.makedirs(os.path.dirname(LOGFILE), exist_ok=True)
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
+# ── Config ────────────────────────────────────────────────────────────────────
+import json
+CONFIG_FILE = os.path.join(HOME, ".config", "music-mode", "config.json")
+
+def load_config():
+    defaults = {
+        "blur_wallpaper": True,
+        "overlay_track_info": False,
+        "player": "spotify,%any",
+        "widget_scale": 1.0
+    }
+    try:
+        with open(CONFIG_FILE, "r") as f:
+            user_conf = json.load(f)
+            defaults.update(user_conf)
+    except:
+        pass
+    return defaults
+
+CONFIG = load_config()
+PLAYER_ARG = f"--player={CONFIG.get('player', 'spotify,%any')}"
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 CACHE  = os.path.join(HOME, "music-mode", "cache")
 os.makedirs(CACHE, exist_ok=True)
@@ -168,44 +190,64 @@ def fmt_time(s):
 
 
 def extract_accent_from_cover(src):
-    """Find the dominant hue in the cover via histogram,
-    then use the most saturated pixel in that hue range.
-    Returns clean accent + vibrant colors that always look good.
+    """Find the true dominant palette of the cover using K-Means (quantize),
+    then pick the best colorful shade. Gently clamps lightness for readability.
+    Returns clean accent + vibrant colors that respect the album's mood.
     """
     try:
         from PIL import Image
         import colorsys
-        img = Image.open(src).convert("RGB").resize((100, 100))
-        pixels = list(img.getdata())
-
-        hue_pixels = [[] for _ in range(36)]
-        for pr, pg, pb in pixels:
-            br = pr * 0.299 + pg * 0.587 + pb * 0.114
-            if br < 20 or br > 235:
-                continue
-            rn = pr / 255.0; gn = pg / 255.0; bn = pb / 255.0
+        img = Image.open(src).convert("RGB")
+        img.thumbnail((150, 150), Image.Resampling.LANCZOS)
+        
+        # Extract a 10-color palette
+        q_img = img.quantize(colors=10, method=2)
+        colors = q_img.convert("RGB").getcolors(150 * 150)
+        
+        # Sort by frequency
+        colors.sort(key=lambda x: x[0], reverse=True)
+        
+        best_color = None
+        best_score = -1
+        total_pixels = sum(c[0] for c in colors)
+        
+        for count, (r, g, b) in colors:
+            rn, gn, bn = r / 255.0, g / 255.0, b / 255.0
             h, l, s = colorsys.rgb_to_hls(rn, gn, bn)
-            if s < 0.10:
-                continue
-            bucket = int(h * 36) % 36
-            hue_pixels[bucket].append((pr, pg, pb, s, l))
-
-        if not any(p for p in hue_pixels if p):
+            
+            freq_score = count / total_pixels
+            
+            # Penalize pure blacks, pure whites, and muddy grays heavily
+            if l < 0.15 or l > 0.85 or s < 0.15:
+                score = freq_score * 0.1
+            else:
+                # Balance frequency with saturation to find a prominent accent
+                score = (freq_score * 0.4) + (s * 0.6)
+                
+            if score > best_score:
+                best_score = score
+                best_color = (h, l, s)
+                
+        if not best_color:
             return "#5588cc", "#77aaff"
-
-        best_bucket = max(range(36), key=lambda i: len(hue_pixels[i]))
-        best = max(hue_pixels[best_bucket], key=lambda x: x[3])
-        rn = best[0] / 255.0; gn = best[1] / 255.0; bn = best[2] / 255.0
-        h, l, s = colorsys.rgb_to_hls(rn, gn, bn)
-
-        r1, g1, b1 = colorsys.hls_to_rgb(h, 0.60, 0.65)
+            
+        h, l, s = best_color
+        
+        # Adaptive clamping: keep the color's natural mood but make it UI-friendly
+        l_accent = max(0.45, min(0.70, l))
+        s_accent = max(0.25, min(0.85, s))
+        
+        l_vibrant = max(0.55, min(0.80, l + 0.10))
+        s_vibrant = max(0.40, min(0.95, s + 0.15))
+        
+        r1, g1, b1 = colorsys.hls_to_rgb(h, l_accent, s_accent)
         accent = f"#{int(r1*255+0.5):02x}{int(g1*255+0.5):02x}{int(b1*255+0.5):02x}"
 
-        r2, g2, b2 = colorsys.hls_to_rgb(h, 0.70, 0.85)
+        r2, g2, b2 = colorsys.hls_to_rgb(h, l_vibrant, s_vibrant)
         vibrant = f"#{int(r2*255+0.5):02x}{int(g2*255+0.5):02x}{int(b2*255+0.5):02x}"
-
+        
         return accent, vibrant
-    except Exception:
+    except Exception as e:
         return "#5588cc", "#77aaff"
 
 
@@ -387,7 +429,7 @@ class ArtProcessor(threading.Thread):
         GLib.idle_add(self.on_update)
 
     def _check(self):
-        status = run("playerctl --player=spotify status")
+        status = run(f"playerctl {PLAYER_ARG} status")
         if status not in ("Playing","Paused"): return
 
         # Poll for wallust accent updates even when cover hasn't changed
@@ -400,8 +442,8 @@ class ArtProcessor(threading.Thread):
             pass
 
         # Check track ID to see if song changed even if art is missing
-        track_id = run("playerctl --player=spotify metadata mpris:trackid")
-        raw_url = run("playerctl --player=spotify metadata mpris:artUrl")
+        track_id = run(f"playerctl {PLAYER_ARG} metadata mpris:trackid")
+        raw_url = run(f"playerctl {PLAYER_ARG} metadata mpris:artUrl")
         
         # If no art URL is provided (common for local Spotify files), try to
         # extract embedded cover art from the actual music file.
@@ -415,8 +457,8 @@ class ArtProcessor(threading.Thread):
             r_code = 1
             # Try to extract embedded cover from matching local file
             try:
-                title  = (run("playerctl --player=spotify metadata xesam:title") or "").strip()
-                artist = (run("playerctl --player=spotify metadata xesam:artist") or "").strip()
+                title  = (run(f"playerctl {PLAYER_ARG} metadata xesam:title") or "").strip()
+                artist = (run(f"playerctl {PLAYER_ARG} metadata xesam:artist") or "").strip()
                 if title and artist and os.path.isdir(LOCAL_DIR):
                     best_match = None
                     best_score = 0
@@ -909,23 +951,23 @@ class SpotifyTracker:
 
     def refresh(self):
         # Runs on a background thread — never called from GTK main loop directly.
-        new_status = run("playerctl --player=spotify status") or "Stopped"
+        new_status = run(f"playerctl {PLAYER_ARG} status") or "Stopped"
         became_active = (new_status in ("Playing","Paused") and
                          self._prev_status not in ("Playing","Paused"))
         self.status       = new_status
         self._prev_status = new_status
 
         if new_status in ("Playing","Paused"):
-            self.song   = run("playerctl --player=spotify metadata xesam:title")  or ""
-            self.artist = run("playerctl --player=spotify metadata xesam:artist") or ""
+            self.song   = run(f"playerctl {PLAYER_ARG} metadata xesam:title")  or ""
+            self.artist = run(f"playerctl {PLAYER_ARG} metadata xesam:artist") or ""
             try:
-                us = int(run("playerctl --player=spotify metadata mpris:length") or "0")
+                us = int(run(f"playerctl {PLAYER_ARG} metadata mpris:length") or "0")
                 self.dur = max(1, us//1_000_000)
             except:
                 self.dur = 1
 
             # Read repeat from playerctl
-            pc_rp = run("playerctl --player=spotify loop")
+            pc_rp = run(f"playerctl {PLAYER_ARG} loop")
             pc_rp = pc_rp if pc_rp in ("None","Track","Playlist") else None
 
             if pc_rp is not None:
@@ -944,7 +986,7 @@ class SpotifyTracker:
                 self._pc_repeat  = pc_rp
 
             # Same logic for shuffle
-            pc_sh_raw = run("playerctl --player=spotify shuffle")
+            pc_sh_raw = run(f"playerctl {PLAYER_ARG} shuffle")
             if pc_sh_raw in ("On","Off","on","off"):
                 pc_sh = pc_sh_raw.lower() == "on"
                 if self._desired_shuffle is None:
@@ -958,13 +1000,13 @@ class SpotifyTracker:
 
             # Volume (no user-intent tracking needed — continuous value)
             try:
-                v = run("playerctl --player=spotify volume")
+                v = run(f"playerctl {PLAYER_ARG} volume")
                 self.volume = max(0, min(100, int(float(v)*100)))
             except: pass
 
         if new_status in ("Playing","Paused") and not self._dragging_ref[0]:
             try:
-                self.pos = int(float(run("playerctl --player=spotify position") or "0"))
+                self.pos = int(float(run(f"playerctl {PLAYER_ARG} position") or "0"))
             except: pass
 
         return became_active
@@ -1294,31 +1336,31 @@ class MusicWidget(Gtk.Window):
         self._last_interaction = time.monotonic()
         key = event.keyval
         if key == Gdk.KEY_space:
-            run("playerctl --player=spotify play-pause")
+            run(f"playerctl {PLAYER_ARG} play-pause")
             self.sp.status = "Paused" if self.sp.status=="Playing" else "Playing"
         elif key == Gdk.KEY_Left:
-            run("playerctl --player=spotify previous")
+            run(f"playerctl {PLAYER_ARG} previous")
             self.sp.pos = 0
         elif key == Gdk.KEY_Right:
-            run("playerctl --player=spotify next")
+            run(f"playerctl {PLAYER_ARG} next")
             self.sp.pos = 0
         elif key == Gdk.KEY_Up:
             self.sp.volume = min(100, self.sp.volume + 5)
-            run(f"playerctl --player=spotify volume {self.sp.volume/100:.2f}")
+            run(f"playerctl {PLAYER_ARG} volume {self.sp.volume/100:.2f}")
             self._vol_show_until = time.monotonic() + 1.5
         elif key == Gdk.KEY_Down:
             self.sp.volume = max(0, self.sp.volume - 5)
-            run(f"playerctl --player=spotify volume {self.sp.volume/100:.2f}")
+            run(f"playerctl {PLAYER_ARG} volume {self.sp.volume/100:.2f}")
             self._vol_show_until = time.monotonic() + 1.5
         elif key in (Gdk.KEY_s, Gdk.KEY_S):
             # S = toggle shuffle
-            run("playerctl --player=spotify shuffle toggle")
+            run(f"playerctl {PLAYER_ARG} shuffle toggle")
             self.sp.set_shuffle(not self.sp.shuffle)
         elif key in (Gdk.KEY_r, Gdk.KEY_R):
             # R = cycle repeat
             cycle    = {"None":"Playlist","Playlist":"Track","Track":"None"}
             new_mode = cycle.get(self.sp.repeat, "None")
-            run(f"playerctl --player=spotify loop {new_mode}")
+            run(f"playerctl {PLAYER_ARG} loop {new_mode}")
             self.sp.set_repeat(new_mode)
         else:
             return False
@@ -1334,7 +1376,7 @@ class MusicWidget(Gtk.Window):
             self.sp.volume = max(0, self.sp.volume - 5)
         else:
             return True
-        run(f"playerctl --player=spotify volume {self.sp.volume/100:.2f}")
+        run(f"playerctl {PLAYER_ARG} volume {self.sp.volume/100:.2f}")
         self._vol_show_until = time.monotonic() + 1.5
         self.da.queue_draw()
         return True
@@ -1383,7 +1425,7 @@ class MusicWidget(Gtk.Window):
 
         # Shuffle toggle
         if abs(x-SHUF_X) < EXTRA_HR and abs(y-EXTRA_Y) < EXTRA_HR:
-            run("playerctl --player=spotify shuffle toggle")
+            run(f"playerctl {PLAYER_ARG} shuffle toggle")
             self.sp.set_shuffle(not self.sp.shuffle)
             self.da.queue_draw()
             return True
@@ -1392,7 +1434,7 @@ class MusicWidget(Gtk.Window):
         if abs(x-REP_X) < EXTRA_HR and abs(y-EXTRA_Y) < EXTRA_HR:
             cycle    = {"None":"Playlist","Playlist":"Track","Track":"None"}
             new_mode = cycle.get(self.sp.repeat, "None")
-            run(f"playerctl --player=spotify loop {new_mode}")
+            run(f"playerctl {PLAYER_ARG} loop {new_mode}")
             self.sp.set_repeat(new_mode)
             self.da.queue_draw()
             return True
@@ -1401,16 +1443,16 @@ class MusicWidget(Gtk.Window):
         if abs(y-CTRL_Y) < 34:
             if abs(x-CTRL_PREV) < 34:
                 if self.sp.pos > 3:
-                    run("playerctl --player=spotify position 0")
+                    run(f"playerctl {PLAYER_ARG} position 0")
                     self.sp.pos = 0
                 else:
-                    run("playerctl --player=spotify previous")
+                    run(f"playerctl {PLAYER_ARG} previous")
                     self.sp.pos = 0
             elif abs(x-CTRL_PLAY) < 34:
-                run("playerctl --player=spotify play-pause")
+                run(f"playerctl {PLAYER_ARG} play-pause")
                 self.sp.status = "Paused" if self.sp.status=="Playing" else "Playing"
             elif abs(x-CTRL_NEXT) < 34:
-                run("playerctl --player=spotify next")
+                run(f"playerctl {PLAYER_ARG} next")
                 self.sp.pos = 0
             self.da.queue_draw()
         return True
@@ -1454,7 +1496,7 @@ class MusicWidget(Gtk.Window):
     def on_release(self, w, event):
         if self._dragging:
             seek = int(self._prog_frac(event.x) * self.sp.dur)
-            run(f"playerctl --player=spotify position {seek}")
+            run(f"playerctl {PLAYER_ARG} position {seek}")
             self.sp.pos = seek
             self._dragging = False
             self.sp._dragging_ref[0] = False

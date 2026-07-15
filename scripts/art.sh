@@ -7,16 +7,14 @@ mkdir -p "$HOME/music-mode/cache"
   echo "" > "$HOME/music-mode/cache/current_cover.txt"
 
 LAST_URL=""
+PLAYER_ARG="--player=spotify,%any"
 
 while true; do
-  PLAYER=$(playerctl -l 2>/dev/null | grep -E "^spotify$" | head -n1)
-  [ -z "$PLAYER" ] && { sleep 1; continue; }
-
-  STATUS=$(playerctl --player="$PLAYER" status 2>/dev/null)
+  STATUS=$(playerctl $PLAYER_ARG status 2>/dev/null)
   [ "$STATUS" != "Playing" ] && [ "$STATUS" != "Paused" ] && { sleep 1; continue; }
 
-  RAW_URL=$(playerctl --player="$PLAYER" metadata mpris:artUrl 2>/dev/null)
-  [[ "$RAW_URL" != *"scdn.co"* ]] && { sleep 1; continue; }
+  RAW_URL=$(playerctl $PLAYER_ARG metadata mpris:artUrl 2>/dev/null)
+  [ -z "$RAW_URL" ] && { sleep 1; continue; }
 
   CLEAN_URL=$(echo "$RAW_URL" | sed 's/\?.*//')
   [ "$CLEAN_URL" = "$LAST_URL" ] && { sleep 1; continue; }
@@ -25,17 +23,25 @@ while true; do
   echo "[art] fetching $CLEAN_URL"
 
   RAW="$HOME/music-mode/cache/cover_raw.jpg"
-  # Download to a temp file first — never write directly to cover_raw.jpg
-  # so the widget never reads a half-written file
   TMP_DOWNLOAD="$HOME/music-mode/cache/cover_download.tmp"
-  curl -sL "$CLEAN_URL" -o "$TMP_DOWNLOAD"
+  
+  if [[ "$CLEAN_URL" == file://* ]]; then
+    # Local file path
+    LOCAL_PATH="${CLEAN_URL#file://}"
+    # URL decode local path
+    LOCAL_PATH="$(printf '%b' "${LOCAL_PATH//%/\\x}")"
+    cp "$LOCAL_PATH" "$TMP_DOWNLOAD" 2>/dev/null
+  else
+    # Remote HTTP(S) path
+    curl -sL "$CLEAN_URL" -o "$TMP_DOWNLOAD"
+  fi
 
   if [ $? -eq 0 ] && [ -s "$TMP_DOWNLOAD" ]; then
     # Verify it's a valid image before replacing
     if file "$TMP_DOWNLOAD" 2>/dev/null | grep -qi "image"; then
       mv "$TMP_DOWNLOAD" "$RAW"
     else
-      echo "[art] download corrupt — skipping"
+      echo "[art] file is not a valid image — skipping"
       rm -f "$TMP_DOWNLOAD"
       sleep 1
       continue
@@ -63,7 +69,7 @@ while true; do
       rm -f "$COVER_TMP"
     fi
   else
-    echo "[art] download failed"
+    echo "[art] download/copy failed"
     rm -f "$TMP_DOWNLOAD"
   fi
 
