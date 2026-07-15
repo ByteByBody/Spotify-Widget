@@ -1486,15 +1486,13 @@ class MusicWidget(Gtk.Window):
                 # We could run Wallust here, but that is heavy. 
                 # Just generating the wallpaper is enough for a smooth preview!
         except Exception as e:
-            log(f"Preview error: {e}")
-
-    def on_key(self, w, event):
-
-        if self.sp.status not in ("Playing","Paused"): return False
+            log(f"Preview error: {e}")    def on_key(self, w, event):
+        log(f"KEY PRESSED: {event.keyval}")
         self._last_interaction = time.monotonic()
         key = event.keyval
         if key in (Gdk.KEY_p, Gdk.KEY_P) and getattr(self, 'mode', 'player') == "player":
             self.mode = "explorer"
+            log("Entering EXPLORER MODE!")
             self.explorer_list = list(reversed(self.sp.history)) if hasattr(self.sp, 'history') else []
             try:
                 import spotipy
