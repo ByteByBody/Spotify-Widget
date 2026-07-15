@@ -1435,58 +1435,34 @@ class MusicWidget(Gtk.Window):
     def on_enter(self, w, event):
         self._hovered = True
         self._last_interaction = time.monotonic()
-        # Gdk.keyboard_grab is X11-only; on Wayland key events reach us via
-        # the normal GTK key-press-event signal as long as the window has focus,
-        # which we re-request here via present_with_time only while hovered.
-        gdk_win = self.get_window()
-        if gdk_win:
-            if not (os.environ.get("WAYLAND_DISPLAY") or
-                    os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")):
-                Gdk.keyboard_grab(gdk_win, False, Gdk.CURRENT_TIME)
-            # On Wayland: request focus only while mouse is inside so keyboard
-            # shortcuts work, but don't raise the window above others.
-            else:
-                self.present_with_time(Gdk.CURRENT_TIME)
+        if os.environ.get("WAYLAND_DISPLAY") or os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+            try:
+                import gi
+                gi.require_version("GtkLayerShell", "0.1")
+                from gi.repository import GtkLayerShell
+                GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.EXCLUSIVE)
+            except: pass
+        else:
+            gdk_win = self.get_window()
+            if gdk_win: Gdk.keyboard_grab(gdk_win, False, Gdk.CURRENT_TIME)
         return False
 
     def on_leave(self, w, event):
         self._hovered      = False
         self._prog_hovered = False
         self._menu_hover   = -1
-        if not (os.environ.get("WAYLAND_DISPLAY") or
-                os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")):
+        if os.environ.get("WAYLAND_DISPLAY") or os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+            try:
+                import gi
+                gi.require_version("GtkLayerShell", "0.1")
+                from gi.repository import GtkLayerShell
+                GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.ON_DEMAND)
+            except: pass
+        else:
             Gdk.keyboard_ungrab(Gdk.CURRENT_TIME)
         return False
-    def _generate_preview(self, track):
-        try:
-            url = track.get("art_url")
-            if not url: return
-            
-            clean = url.split("?")[0]
-            if clean.startswith("spotify:image:"):
-                clean = "https://i.scdn.co/image/" + clean.split(":")[-1]
-                
-            prev_raw = os.path.join(CACHE, "preview_raw.jpg")
-            if clean.startswith("http"):
-                subprocess.run(["curl", "-sL", clean, "-o", prev_raw], stderr=subprocess.DEVNULL)
-            elif clean.startswith("file://"):
-                import urllib.parse
-                p = urllib.parse.unquote(clean[7:])
-                import shutil
-                shutil.copy2(p, prev_raw)
-                
-            if os.path.exists(prev_raw):
-                # Update wallpaper
-                make_and_set_wallpaper(prev_raw)
-                
-                # Optional: update colors
-                bg_col = extract_cover_bg(prev_raw)
-                write_file(BG_CSS_FILE, f"@define-color cover-bg {bg_col};\n")
-                
-                # We could run Wallust here, but that is heavy. 
-                # Just generating the wallpaper is enough for a smooth preview!
-        except Exception as e:
-            log(f"Preview error: {e}")    def on_key(self, w, event):
+
+    def on_key(self, w, event):
         log(f"KEY PRESSED: {event.keyval}")
         self._last_interaction = time.monotonic()
         key = event.keyval
