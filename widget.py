@@ -1414,12 +1414,10 @@ class MusicWidget(Gtk.Window):
                 self.explorer_scroll += (tgt_scroll - self.explorer_scroll) * 0.2
                 self.da.queue_draw()
             
-            import time
             if hasattr(self, 'preview_timer') and self.preview_timer > 0 and time.time() > self.preview_timer:
                 self.preview_timer = 0
                 if self.explorer_list:
                     track = self.explorer_list[self.explorer_sel]
-                    import threading
                     threading.Thread(target=self._generate_preview, args=(track,), daemon=True).start()
 
         # ── Idle-skip optimisation ────────────────────────────────────────────
@@ -1515,7 +1513,9 @@ class MusicWidget(Gtk.Window):
                 # We could run Wallust here, but that is heavy. 
                 # Just generating the wallpaper is enough for a smooth preview!
         except Exception as e:
-            log(f"Preview error: {e}")    def on_key(self, w, event):
+            log(f"Preview error: {e}")
+
+    def on_key(self, w, event):
         log(f"KEY PRESSED: {event.keyval}")
         self._last_interaction = time.monotonic()
         key = event.keyval
@@ -1558,7 +1558,6 @@ class MusicWidget(Gtk.Window):
         if getattr(self, 'mode', 'player') == "explorer":
             if key == Gdk.KEY_Escape:
                 self.mode = "player"
-                import threading
                 threading.Thread(target=make_and_set_wallpaper, args=(COVER_RAW,), daemon=True).start()
                 self.da.queue_draw()
                 return True
